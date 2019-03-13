@@ -1,0 +1,213 @@
+---
+title: "Regression Model"
+author: "Joshua"
+date: "13 March 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Compliance Plan
+
+The current reliance on running compliance reviews to obtain data for the median time taken to complete business surveys places burden on both respondents and the ONS. An aim of reworking compliance is to reduce burden and automate the process. If median time could be obtained from existing data these would significantly reduce the cost and time and allow compliance review surveys to be ended. 
+
+## Regression Model
+
+This task is essentially a machine learning challenge, can a method be developed that would accurately predict the median time from a set of variables that are readily available. Variables that are correlated with the outcome variable are needed and two available variables the question count and number of pages would seem likely to be predictive of median time. The correlation coefficient can be estimated to check this assumption. 
+
+As the sample size is going to be small this restricts the options available as many machine learning algorithms are data intensive. Regression is therefore used as this is most appropriate for smaller data sets. This document is going to  the feasibility of this approach. First the correlation is checked. then a regression model is trained on the data, a training/test split is not implemented as there is not enough data available for this approach. Then predictive values are generated to examine the difference between the actual values and the predicted values. 
+
+```{r include=FALSE}
+library(readxl)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(bbplot)
+
+knitr::knit_hooks$set(
+   error = function(x, options) {
+     paste('\n\n<div class="alert alert-danger">',
+           gsub('##', '\n', gsub('^##\ Error', '**Error**', x)),
+           '</div>', sep = '\n')
+   },
+   warning = function(x, options) {
+     paste('\n\n<div class="alert alert-warning">',
+           gsub('##', '\n', gsub('^##\ Warning:', '**Warning**', x)),
+           '</div>', sep = '\n')
+   },
+   message = function(x, options) {
+     paste('\n\n<div class="alert alert-info">',
+           gsub('##', '\n', x),
+           '</div>', sep = '\n')
+   }
+)
+```
+
+```{r include=FALSE}
+comp = read_excel("Compliance_Costs_17_18.xlsx",
+                  sheet= "Analysis")
+
+comp2 = read_excel("Number_of_Questions_per_Survey.xlsx", sheet = 2, skip = 3)
+
+comp3 = comp[, 1:5]
+
+colnames(comp2)[1] = ("Survey Code")  
+
+full = inner_join(comp2, comp3, by = "Survey Code")
+
+full1 <- filter(full, !is.na(full$`Median Completion Time`))
+full2 <- full1 %>%
+  filter(!str_detect(full1$No_of_Questions, "\\?"))
+
+
+#filter for just compliance review and time wuestion 
+
+sub <-    full %>%
+filter(str_detect(full$`time question`, "yes") | str_detect(full$`compliance review`, "yes")) 
+
+#elimintae NA 
+
+subb <- filter(sub, !is.na(sub$`Median Completion Time`))
+
+#analysis on just complaince review and time question
+
+colnames(subb) = c("Survey_Code", "frequency", "No_Questions", "compliance_review", "time_question", "survey_questionnaire" , "mode", "Frequency", "Sample_Size", "Achieved_Sample", "Median_Time")          
+
+fin1 <- subb %>%
+  filter(!str_detect(subb$No_Questions, "\\?"))
+
+fin <- transform(fin1, No_Questions= as.numeric(No_Questions)) 
+
+#fin is the final dataset without NA and just compl and time and two outlier corrected
+#fin1 final dataset but with outliers not corrected
+#full2 is full dataset, with NA removed and \\? removered
+#use to remove outliers, will then
+fin[5,3] = 20
+fin[10,11] = 15
+
+```
+
+## Correlation 
+First the Pearson correlation coefficient between the Number of questions and the Median time is examined. Note that correlation is not causation. however as this is a predictive model a deterministic model is not being estimated, all we are trying to achieve is to accurately predict values not determine the cause of them.  
+
+```{r echo=FALSE, comment=""}
+print(paste0("The correlation for the full dataset is ", cor(as.numeric(full2$No_of_Questions), full2$`Median Completion Time`)))
+
+```
+
+This shows that the correlation is very low. This may because of unreliable median time which come from estimates from survey managers. Better data might be obtained by restricting the data set to time data only obtained from compliance reviews and median time questions on surveys as these two sources are of a higher accuracy.  
+
+## Restricting data 
+
+```{r echo=FALSE, comment=""}
+print(paste0("The correlation for the data with outliers is ", cor(as.numeric(fin1$No_Questions), fin1$Median_Time)))
+```
+The correlation is has increases but is still very low. This is due to the presence of outlines which can significantly reduce correlation between variables. Plotting the data reveals the presence of two extreme outlines. 
+
+```{r echo=FALSE, comment=""}
+fin1$No_Questions = as.numeric(fin1$No_Questions)
+
+ggplot(fin1, aes(fin1$Median_Time, fin1$No_Questions)) + geom_point() + ggtitle("Scatter plot to examine outliers") +
+xlab("Number of Questions") + ylab("Median Time") 
+```
+
+## Removing outliers
+
+Removing the outliers resulting in a significantly higher correlation.
+
+```{r echo=FALSE, comment=""}
+print(paste0("The correlation for the trimmed data is ", cor(fin$No_Questions, fin$Median_Time)))
+```
+
+This data is then used to estimate the model. Currently this is a small sample of `r length(fin$frequency)`
+
+___
+
+## Regression model
+
+A regression model is estimated with the **Median Time** as the dependent variable and the number of questions as the independent variable. Currently this is only a univariate regression, once data on page count is collected a multivariate regression can be examined. 
+
+$$\hat{y} = a + bx$$
+
+where 
+
+$$b = \frac {{SS}_{xy}}{{SS}_{xx}}$$
+
+and 
+
+$$\bar{y} = a + b\bar{x}$$
+
+
+```{r echo=FALSE, comment=""}
+model <- lm(Median_Time ~ No_Questions, data = fin)
+summary(model)
+```
+
+The results shows a fit of `r summary(model)$r.squared`, This is not very high, but acceptable. Hopefully this will increase with more data and variables. The coefficient shows that an increase of 1 question leads to a increase in the time taken by `r model$coefficients[2]` 
+
+There is a question on how the questions are counted, potentially a different methodology might change the results which may increase the fit.
+
+The OLS regression is fit to the data. 
+
+```{r echo=FALSE}
+
+ggplot(fin, aes(fin$Median_Time, fin$No_Questions)) + geom_point() + 
+ggtitle("Scatter plot to examine outliers") + xlab("Number of Questions") + ylab("Median Time") +
+geom_smooth(method = "lm", fill=NA) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+## Residuals
+
+It is a good idea to examine the distribution of the regression residuals to look for normality. 
+
+```{r echo=FALSE}
+
+ggplot(model, aes(model$residuals)) + geom_histogram(binwidth = 12, colour = "white", fill = "#1380A1") +
+  labs( title = "Distribution of Residuals") + xlab("Residuals") +ylab("") + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+They appear to follow a rough normal distribution but the sample is small making inference hard. 
+
+## Model Fit 
+
+Plotting the actual values against the predicted values allows the fit to be seen visually. A perfect fit would see all values along the 45 degree line or x=y line. So a perfect fit would see an actual value of 30 against a predicted value of 30. 
+
+```{r echo=FALSE}
+
+fin = predict(model, interval = "confidence") %>%
+  cbind(fin)
+
+ggplot(data = fin, aes(fin$Median_Time, fin$fit)) + geom_point() + geom_abline(slope = 1) + theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Comparison of actual values vs predicted values") + xlab("Actual") + ylab("Predicted") + theme_bw() +
+  theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+
+As can be seen there is not a perfect fit. It seems that the model overestimates the **Median Time** at lower values and underestimates at higher values. 
+
+A general point on assessing the fit of the model. If the errors are normally distributed, as examined by the residuals, then it means that in aggregate the errors will cancel out. This means the total compliance cost will be reasonably accurate. However if the aim is to very accurately estimate individual Median time then this is like to be difficult as the signal is noisy and there are not many variables or much data on which too train a model. As I think the data on compliance is likely to be mainly needed in the aggregate then I believe this approach should be able to approximate the **Median Time** to a reasonable degree. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
